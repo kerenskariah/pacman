@@ -1,3 +1,5 @@
+# This has all training loops and playing loops.
+
 import os
 import logging
 import ale_py

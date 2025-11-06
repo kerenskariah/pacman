@@ -1,3 +1,5 @@
+# Use this to test your models.
+
 import os
 from main import train, play
 from agents.random_agent import RandomAgent
