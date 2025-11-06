@@ -7,15 +7,19 @@ from config.base import BaseConfig
 
 logger = logging.getLogger(__name__)
 
+logger.info("Registering environment.")
 gym.register_envs(ale_py)
 
 # Train the agent based on provided config
 def train(agent: type[BaseAgent], config: BaseConfig, render_human: bool = False):
     
+    logger.info("Entered training function.")
+    
     # Create directory (this is where we save model checkpoints, if it alr exists, dw about it)
     os.makedirs(config.MODEL_DIR, exist_ok=True)
     # Directory for training logs
     os.makedirs(config.LOG_DIR, exist_ok=True)
+    logger.info("Created directories for training logs and save files.")
 
     # Create gymnasium environment for training
     # https://gymnasium.farama.org/api/env/
@@ -25,6 +29,8 @@ def train(agent: type[BaseAgent], config: BaseConfig, render_human: bool = False
         env = gym.make(game_environment, render_mode="human")
     else:
         env = gym.make(game_environment)
+    
+    logger.info("Created training environment.")
 
     training_agent = agent(env.action_space, config)
     logger.info("Created training agent.")
@@ -75,11 +81,18 @@ def train(agent: type[BaseAgent], config: BaseConfig, render_human: bool = False
 
         # Mod to check periodically for saving the agent
         if (episode + 1) % config.SAVE_INTERVAL == 0:
-            training_agent.save(f"{config.MODEL_DIR}/agent_ep{episode + 1}.pkl")
-            logger.info(f"Saved trained agent after {episode} as {config.MODEL_DIR}/agent_ep{episode + 1}.pkl")
+            path_name = f"{config.MODEL_DIR}/agent_ep{episode + 1}.pkl"
+            training_agent.save(path_name)
+            logger.info(f"Saved trained agent after episode {episode} as {path_name}")
 
     env.close()
+
+    model_path = f"{config.MODEL_DIR}/agent_final.pkl"
+    training_agent.save(model_path)
+    logger.info(f"Saved final model to {model_path}")
     logger.info("Done with training.")
+
+    return model_path
 
 # Make agent play the game for num_episodes given that you already trained it.
 def play(agent_class: type[BaseAgent], config: BaseConfig, model_path: str, num_episodes: int = 5):
@@ -87,8 +100,12 @@ def play(agent_class: type[BaseAgent], config: BaseConfig, model_path: str, num_
     env = gym.make("ALE/MsPacman-v5", render_mode="human")    
 
     agent = agent_class(env.action_space, config)
-    agent.load(model_path)
-    logger.info(f"Loaded model from {model_path}")
+    
+    if model_path != '':
+        agent.load(model_path)
+        logger.info(f"Loaded model from {model_path}")
+    else:
+        logger.info('No save file (.pkl) provided, just using untrained model.')
     
     for episode in range(num_episodes):
         observation, info = env.reset()

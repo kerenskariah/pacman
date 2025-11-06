@@ -1,4 +1,4 @@
-from agents.base_agent import BaseAgent
+from agents.base import BaseAgent
 
 class RandomAgent(BaseAgent):    
     def get_action(self, observation):
