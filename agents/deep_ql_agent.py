@@ -6,6 +6,7 @@ import math
 import random
 from dataclasses import dataclass
 from typing import Optional, Tuple
+from config.base import BaseConfig
 
 import numpy as np
 import torch
@@ -155,7 +156,7 @@ class ReplayBuffer:
 # ====================================================
 
 @dataclass
-class DQNConfig:
+class DQNConfig(BaseConfig):
     gamma: float = 0.99
     lr: float = 1e-4
     batch_size: int = 64
@@ -187,7 +188,7 @@ class DQNAgent(BaseAgent):
     def __init__(self, action_space, config=None):
         super().__init__(action_space, config)
         self.action_space = action_space
-        self.cfg = DQNConfig()
+        self.cfg = config
         self.device = torch.device(self.cfg.device)
 
         # Lazy init after first observation
