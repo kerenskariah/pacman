@@ -2,13 +2,17 @@ ale-py==0.11.2
 cloudpickle==3.1.2
 farama-notifications==0.0.4
 gymnasium==1.2.2
-numpy==2.2.6
+# Pin NumPy to a 1.x release to avoid binary incompatibilities with some compiled
+# extensions (e.g. PyTorch/ale-py compiled against NumPy 1.x). Upgrade other
+# extensions instead of NumPy if you need 2.x in future.
+numpy==1.26.4
 typing-extensions==4.15.0
 torch
 torchvision
 opencv-python
-numpy
 tqdm
 matplotlib
 tensorboard
 pyyaml
+# AutoROM to download Atari ROMs (necessary for ALE/MsPacman-v5)
+autorom[accept-rom-license]

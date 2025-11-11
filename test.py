@@ -3,6 +3,7 @@
 import os
 from main import train, play
 from agents.random_agent import RandomAgent
+from agents.deep_ql_agent import DQNAgent 
 from config.random_config import RandomConfig
 from logging import getLogger
 
@@ -14,6 +15,8 @@ def main():
     logger.info("In main.")
     _ = train(RandomAgent, RandomConfig, False)
     play(RandomAgent, RandomConfig, '', num_episodes=1)
+    _ = train(DQNAgent, RandomConfig, False)
+    play(DQNAgent, RandomConfig, '', num_episodes=1)
 
 if __name__ == '__main__':
     main()
