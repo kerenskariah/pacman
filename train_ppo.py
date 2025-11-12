@@ -240,7 +240,6 @@ def plot_rewards(rewards_history: List[float], log_dir: str, update: int, total_
 
 
 def compute_gae(cfg: PPOConfig, rewards, values, dones, last_values):
-    """Compute Generalized Advantage Estimation."""
     T, B = rewards.shape
     advantages = torch.zeros((T, B), dtype=torch.float32, device=rewards.device)
     gae = torch.zeros((B,), dtype=torch.float32, device=rewards.device)
@@ -553,7 +552,7 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
 
 @torch.no_grad()
 def play(cfg: PPOConfig, model_path: str, episodes: int = 5):
-    env = make_single_env(cfg, render=True)
+    env = make_single_env(cfg, render=True)()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     action_dim = env.action_space.n
 
@@ -566,15 +565,38 @@ def play(cfg: PPOConfig, model_path: str, episodes: int = 5):
         obs, _ = env.reset()
         done = False
         total_reward = 0.0
+        raw_score = 0.0
         steps = 0
         while not done:
             obs_t = torch.as_tensor(obs[None, ...], device=device)
             logits, _ = net(obs_t)
             dist = Categorical(logits=logits)
             action = dist.sample().item()
-            obs, r, terminated, truncated, _ = env.step(action)
+            obs, r, terminated, truncated, info = env.step(action)
             total_reward += r
             steps += 1
             done = terminated or truncated
-        logger.info(f"Episode {ep+1}: reward={total_reward:.1f}, steps={steps}")
+            
+            # Track raw score if available
+            if done and 'raw_score' in info and info['raw_score'] is not None:
+                raw_score = info['raw_score']
+        
+        logger.info(f"Episode {ep+1}: Clipped Reward={total_reward:.1f}, Raw Score={raw_score:.1f}, Steps={steps}")
     env.close()
+
+def train_ppo_agent(agent_class, config: PPOConfig, render_human: bool = False):
+    logger.info("Starting PPO training...")
+    if render_human:
+        logger.warning("render_human=True disabled for PPO training, it's way too slow.")
+    
+    final_model_path = train(cfg=config, resume_from=None)
+    return final_model_path
+
+
+def play_ppo_agent(agent_class, config: PPOConfig, model_path: str, num_episodes: int = 5):
+    if not os.path.exists(model_path):
+        logger.error(f"Model file not found: {model_path}")
+        raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
+    
+    logger.info(f"Playing {num_episodes} episodes with trained PPO agent from {model_path}")
+    play(cfg=config, model_path=model_path, episodes=num_episodes)
