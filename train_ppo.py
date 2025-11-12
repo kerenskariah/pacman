@@ -47,22 +47,31 @@ class RawScoreWrapper(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
         self.raw_episode_score = 0.0
+        self.episode_score = 0.0  # Accumulates across lives
     
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         self.raw_episode_score += reward
+        self.episode_score += reward
         
-        # Store raw score in info
+        # Always store current accumulated score in info
+        info['raw_score'] = self.episode_score
+        
+        # Reset only on actual game over (truncated usually means time limit or actual game end)
         if terminated or truncated:
-            info['raw_score'] = self.raw_episode_score
-            self.raw_episode_score = 0.0
-        else:
-            info['raw_score'] = None
-            
+            # Check if this is actual game over vs just life loss
+            # In Atari, truncated typically means true end, terminated can be life loss
+            if truncated or (terminated and info.get('lives', 0) == 0):
+                # True game over - keep the score in info for logging
+                info['episode_score'] = self.episode_score
+                self.episode_score = 0.0
+                self.raw_episode_score = 0.0
+        
         return obs, reward, terminated, truncated, info
     
     def reset(self, **kwargs):
         self.raw_episode_score = 0.0
+        self.episode_score = 0.0
         return self.env.reset(**kwargs)
 
 
@@ -374,7 +383,10 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
                         # Get raw score from info
                         raw_score = 0.0
                         if 'final_info' in infos and infos['final_info'][i]:
-                            if 'raw_score' in infos['final_info'][i]:
+                            # Try to get episode_score (full game score) or raw_score (current score)
+                            if 'episode_score' in infos['final_info'][i]:
+                                raw_score = float(infos['final_info'][i]['episode_score'])
+                            elif 'raw_score' in infos['final_info'][i] and infos['final_info'][i]['raw_score'] is not None:
                                 raw_score = float(infos['final_info'][i]['raw_score'])
                         
                         rewards_history.append(clipped_reward)
@@ -573,12 +585,12 @@ def play(cfg: PPOConfig, model_path: str, episodes: int = 5):
             dist = Categorical(logits=logits)
             action = dist.sample().item()
             obs, r, terminated, truncated, info = env.step(action)
-            total_reward += r
+            total_reward += r  # This is the clipped reward
             steps += 1
             done = terminated or truncated
             
-            # Track raw score if available
-            if done and 'raw_score' in info and info['raw_score'] is not None:
+            # Update raw score from info (updated every step)
+            if 'raw_score' in info:
                 raw_score = info['raw_score']
         
         logger.info(f"Episode {ep+1}: Clipped Reward={total_reward:.1f}, Raw Score={raw_score:.1f}, Steps={steps}")

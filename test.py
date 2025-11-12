@@ -1,7 +1,7 @@
 # Use this to test your models.
 import os
 import argparse
-from main import train, play
+from main import train as main_train, play as main_play
 from logging import getLogger
 
 from agents.random_agent import RandomAgent
@@ -9,7 +9,7 @@ from config.random_config import RandomConfig
 from agents.deep_ql_agent import DQNAgent, DQNConfig
 
 # PPO imports
-from train_ppo import train_ppo_agent, play_ppo_agent
+from train_ppo import train_ppo_agent, play_ppo_agent, train as ppo_train
 from config.ppo_config import PPOConfig
 
 # Disable the SDL audio driver warnings so there's no console warning output fo rit
@@ -31,8 +31,8 @@ def main():
 
     agent_to_run = None
     config_to_use = None
-    train_func = train
-    play_func = play
+    train_func = main_train
+    play_func = main_play
 
     if args.agent.lower() == 'random':
         agent_to_run = RandomAgent
@@ -56,13 +56,12 @@ def main():
         
         # Handle resume functionality for PPO
         if args.agent.lower() == 'ppo' and resume_from:
-            from train_ppo import train
             if not os.path.exists(resume_from):
                 logger.error(f"Resume checkpoint not found: {resume_from}")
                 return
             
             logger.info(f"Resuming PPO training from checkpoint: {resume_from}")
-            model_path = train(cfg=config_to_use, resume_from=resume_from)
+            model_path = ppo_train(cfg=config_to_use, resume_from=resume_from)
         else:
             # Normal training (no resume)
             if resume_from and args.agent.lower() != 'ppo':
