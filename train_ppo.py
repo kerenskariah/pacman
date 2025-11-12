@@ -9,6 +9,7 @@ import math
 import time
 import random
 import logging
+import csv
 from typing import Tuple, List
 
 import numpy as np
@@ -41,6 +42,30 @@ def seed_everything(seed: int):
         torch.cuda.manual_seed_all(seed)
 
 
+class RawScoreWrapper(gym.Wrapper):
+    """Wrapper to track raw game scores before reward clipping."""
+    def __init__(self, env):
+        super().__init__(env)
+        self.raw_episode_score = 0.0
+    
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        self.raw_episode_score += reward
+        
+        # Store raw score in info
+        if terminated or truncated:
+            info['raw_score'] = self.raw_episode_score
+            self.raw_episode_score = 0.0
+        else:
+            info['raw_score'] = None
+            
+        return obs, reward, terminated, truncated, info
+    
+    def reset(self, **kwargs):
+        self.raw_episode_score = 0.0
+        return self.env.reset(**kwargs)
+
+
 def make_single_env(cfg: PPOConfig, render: bool = False):
     def _thunk():
         env = gym.make(
@@ -49,6 +74,9 @@ def make_single_env(cfg: PPOConfig, render: bool = False):
             repeat_action_probability=cfg.STICKY_PROB,
             render_mode="human" if render else None,
         )
+
+        # Wrap to track raw scores before reward transformation
+        env = RawScoreWrapper(env)
 
         env = AtariPreprocessing(
             env,
@@ -235,6 +263,29 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
     os.makedirs(cfg.MODEL_DIR, exist_ok=True)
     os.makedirs(cfg.LOG_DIR, exist_ok=True)
 
+    # Initialize CSV logging
+    csv_path = os.path.join(cfg.LOG_DIR, "training_log.csv")
+    episode_csv_path = os.path.join(cfg.LOG_DIR, "episode_log.csv")
+    
+    # Check if resuming to append to existing CSV
+    csv_exists = resume_from is not None and os.path.exists(csv_path)
+    episode_csv_exists = resume_from is not None and os.path.exists(episode_csv_path)
+    
+    csv_file = open(csv_path, 'a' if csv_exists else 'w', newline='')
+    csv_writer = csv.writer(csv_file)
+    if not csv_exists:
+        csv_writer.writerow([
+            'update', 'episodes_completed', 'avg_reward', 'avg_score',
+            'policy_loss', 'value_loss', 'entropy', 'clip_frac', 'kl'
+        ])
+    
+    episode_csv_file = open(episode_csv_path, 'a' if episode_csv_exists else 'w', newline='')
+    episode_csv_writer = csv.writer(episode_csv_file)
+    if not episode_csv_exists:
+        episode_csv_writer.writerow([
+            'episode', 'update', 'raw_score', 'clipped_reward', 'steps'
+        ])
+
     # Vector env
     env = make_vector_env(cfg, render_first_env=False)
     seeds = [cfg.SEED + i for i in range(cfg.NUM_ENVS)]
@@ -249,6 +300,8 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
     # Resume from checkpoint if specified
     start_update = 1
     rewards_history: List[float] = []
+    scores_history: List[float] = []
+    episode_count = 0
     
     if resume_from is not None and os.path.exists(resume_from):
         logger.info(f"Resuming from checkpoint: {resume_from}")
@@ -271,6 +324,13 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
         if "rewards_history" in checkpoint:
             rewards_history = checkpoint["rewards_history"]
             logger.info(f"Loaded {len(rewards_history)} episode rewards from history")
+        
+        if "scores_history" in checkpoint:
+            scores_history = checkpoint["scores_history"]
+            logger.info(f"Loaded {len(scores_history)} episode scores from history")
+        
+        if "episode_count" in checkpoint:
+            episode_count = checkpoint["episode_count"]
         
         # Load scaler state if available (for mixed precision)
         if "scaler" in checkpoint and cfg.USE_AMP:
@@ -308,7 +368,25 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
             if np.any(done_mask):
                 for i, d in enumerate(done_mask):
                     if d:
-                        rewards_history.append(float(ep_returns[i]))
+                        episode_count += 1
+                        clipped_reward = float(ep_returns[i])
+                        episode_steps = int(ep_lengths[i])
+                        
+                        # Get raw score from info
+                        raw_score = 0.0
+                        if 'final_info' in infos and infos['final_info'][i]:
+                            if 'raw_score' in infos['final_info'][i]:
+                                raw_score = float(infos['final_info'][i]['raw_score'])
+                        
+                        rewards_history.append(clipped_reward)
+                        scores_history.append(raw_score)
+                        
+                        # Log episode to CSV
+                        episode_csv_writer.writerow([
+                            episode_count, update, raw_score, clipped_reward, episode_steps
+                        ])
+                        episode_csv_file.flush()
+                        
                         ep_returns[i] = 0.0
                         ep_lengths[i] = 0
 
@@ -398,14 +476,34 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
 
         # Logging
         if update % cfg.LOG_INTERVAL == 0:
-            window = rewards_history[-(cfg.LOG_INTERVAL * cfg.NUM_ENVS):] or [0.0]
-            avg_ep_reward = float(np.mean(window))
+            window_size = cfg.LOG_INTERVAL * cfg.NUM_ENVS
+            reward_window = rewards_history[-window_size:] if len(rewards_history) >= window_size else rewards_history
+            score_window = scores_history[-window_size:] if len(scores_history) >= window_size else scores_history
+            
+            avg_ep_reward = float(np.mean(reward_window)) if reward_window else 0.0
+            avg_ep_score = float(np.mean(score_window)) if score_window else 0.0
+            
+            # Write to CSV
+            csv_writer.writerow([
+                update,
+                len(rewards_history),
+                avg_ep_reward,
+                avg_ep_score,
+                np.mean(policy_losses),
+                np.mean(value_losses),
+                np.mean(entropies),
+                np.mean(clip_fracs),
+                np.mean(kls)
+            ])
+            csv_file.flush()
+            
             logger.info(
                 f"Update {update}/{cfg.TOTAL_UPDATES} | "
                 f"Episodes: {len(rewards_history)} | "
-                f"AvgReward: {avg_ep_reward:.1f} | "
-                f"PolLoss: {np.mean(policy_losses):.4f} | "
-                f"ValLoss: {np.mean(value_losses):.4f} | "
+                f"Avg Reward: {avg_ep_reward:.1f} | "
+                f"Avg Score: {avg_ep_score:.1f} | "
+                f"Policy Loss: {np.mean(policy_losses):.4f} | "
+                f"Value Loss: {np.mean(value_losses):.4f} | "
                 f"Entropy: {np.mean(entropies):.3f} | "
                 f"ClipFrac: {np.mean(clip_fracs):.3f} | "
                 f"KL: {np.mean(kls):.4f}"
@@ -419,6 +517,8 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
                 "scaler": agent.scaler.state_dict(),
                 "update": update,
                 "rewards_history": rewards_history,
+                "scores_history": scores_history,
+                "episode_count": episode_count,
                 "cfg": cfg.__dict__
             }, path)
             logger.info(f"Saved checkpoint to {path}")
@@ -434,6 +534,8 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
         "scaler": agent.scaler.state_dict(),
         "update": cfg.TOTAL_UPDATES,
         "rewards_history": rewards_history,
+        "scores_history": scores_history,
+        "episode_count": episode_count,
         "cfg": cfg.__dict__
     }, final_path)
     logger.info(f"Saved final model to {final_path}")
@@ -441,17 +543,17 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
     # Final plot
     plot_rewards(rewards_history, cfg.LOG_DIR, cfg.TOTAL_UPDATES, cfg.TOTAL_UPDATES, is_final=True)
 
+    # Close CSV files
+    csv_file.close()
+    episode_csv_file.close()
+    logger.info(f"Training logs saved to {csv_path} and {episode_csv_path}")
+
     env.close()
     return final_path
 
-
-def make_eval_env(cfg: PPOConfig):
-    return make_single_env(cfg, render=True)()
-
-
 @torch.no_grad()
 def play(cfg: PPOConfig, model_path: str, episodes: int = 5):
-    env = make_eval_env(cfg)
+    env = make_single_env(cfg, render=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     action_dim = env.action_space.n
 
