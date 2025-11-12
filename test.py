@@ -49,7 +49,7 @@ def main():
         raise ValueError(f"Unknown agent: {args.agent}")
 
     model_path = args.model_path
-    resume_from = args.resume_fromp
+    resume_from = args.resume_from
 
     if args.mode == "train" or args.mode == "both":
         logger.info(f"Running training for agent: {args.agent}")
