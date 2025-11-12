@@ -4,3 +4,5 @@ farama-notifications==0.0.4
 gymnasium==1.2.2
 numpy==2.2.6
 typing-extensions==4.15.0
+torch>=2.0.0
+matplotlib>=3.7.0
