@@ -1,0 +1,46 @@
+group_members:
+  group_member_1:
+    name: Haylie Tan
+    student_id: 921938934
+    email: haytan@ucdavis.edu
+    github_username: haylietan
+  group_member_2:
+    name: Ann Le
+    student_id: 921289858
+    email: anxle@ucdavis.edu
+    github_username: anxlet17
+  group_member_3:
+    name: Grace Zhang
+    student_id: 922221776
+    email: gzzhang@ucdavis.edu
+    github_username: gzzhang5
+  group_member_4:
+    name: Joanne Lai
+    student_id: 922514771
+    email: joalai@ucdavis.edu
+    github_username: joey71722
+  group_member_5:
+    name: Sandeep Reehal
+    student_id: 920762554
+    email: sreehal@ucdavis.edu
+    github_username: reehals
+  group_member_6:
+    name: Keren Skariah
+    student_id: 922219940
+    email: krskariah@ucdavis.edu
+    github_username: kerenskariah
+  group_member_7:
+    name: Sathvik Parasa
+    student_id: 922076112
+    email: saparasa@ucdavis.edu
+    github_username: sathvikparasa
+  group_member_8:
+    name: Shreyans Porwal
+    student_id: 921996219
+    email: porwal@ucdavis.edu
+    github_username: shreyansporwal
+  group_member_9:
+    name: Ian Wong
+    student_id:  920833519
+    email: ianwong@ucdavis.edu
+    github_username: wong-ian
