@@ -29,6 +29,7 @@ import ale_py
 import matplotlib.pyplot as plt
 
 from config.ppo_config import PPOConfig
+from exploration_tracker import ExplorationTracker
 
 logging.basicConfig(level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
@@ -40,37 +41,36 @@ def seed_everything(seed: int):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+    if torch.backends.mps.is_available():
+        # MPS doesn't need special seeding, torch.manual_seed handles it
+        pass
 
 
 class RawScoreWrapper(gym.Wrapper):
-    """Wrapper to track raw game scores before reward clipping."""
+    """Wrapper to track raw game scores BEFORE reward scaling."""
     def __init__(self, env):
         super().__init__(env)
-        self.raw_episode_score = 0.0
-        self.episode_score = 0.0  # Accumulates across lives
+        self.episode_score = 0.0  # Accumulates raw rewards
     
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        self.raw_episode_score += reward
-        self.episode_score += reward
         
-        # Always store current accumulated score in info
+        # Accumulate the RAW reward (before any scaling)
+        self.episode_score += float(reward)
+        
+        # Store current score in info
         info['raw_score'] = self.episode_score
         
-        # Reset only on actual game over (truncated usually means time limit or actual game end)
+        # On episode end, store the final score
         if terminated or truncated:
-            # Check if this is actual game over vs just life loss
-            # In Atari, truncated typically means true end, terminated can be life loss
-            if truncated or (terminated and info.get('lives', 0) == 0):
-                # True game over - keep the score in info for logging
-                info['episode_score'] = self.episode_score
-                self.episode_score = 0.0
-                self.raw_episode_score = 0.0
+            info['episode_score'] = self.episode_score
+            info['final_raw_score'] = self.episode_score
         
         return obs, reward, terminated, truncated, info
     
     def reset(self, **kwargs):
-        self.raw_episode_score = 0.0
+        self.episode_score = 0.0
+        return self.env.reset(**kwargs)
         self.episode_score = 0.0
         return self.env.reset(**kwargs)
 
@@ -92,11 +92,16 @@ def make_single_env(cfg: PPOConfig, render: bool = False):
             screen_size=84,
             grayscale_obs=True,
             frame_skip=cfg.FRAME_SKIP,
-            terminal_on_life_loss=True,
+            terminal_on_life_loss=False,  # FIXED: Learn across multiple lives
         )
 
         env = FrameStackObservation(env, stack_size=cfg.FRAME_STACK, padding_type="reset")
-        env = TransformReward(env, lambda r: np.sign(r))
+        
+        # CHANGED: Increased from 0.01 to 0.1 for better reward signal
+        # MsPacman: Dot=10 (1.0), Ghost=200 (20.0). 
+        # This preserves the "hunting" incentive with stronger signal.
+        env = TransformReward(env, lambda r: 0.1 * r)
+        
         return env
     return _thunk
 
@@ -142,10 +147,17 @@ class ACNetCNN(nn.Module):
 class PPOAgent:
     def __init__(self, cfg: PPOConfig, action_dim: int):
         self.cfg = cfg
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Prefer MPS on Mac, then CUDA, then CPU
+        if torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        elif torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
         cfg.DEVICE = str(self.device)  # Update config
+        print(f"PPO Agent using device: {self.device}")
         self.net = ACNetCNN(action_dim).to(self.device)
-        self.opt = torch.optim.Adam(self.net.parameters(), lr=cfg.LR)
+        self.opt = torch.optim.Adam(self.net.parameters(), lr=cfg.LR, eps=1e-5)
         self.scaler = torch.cuda.amp.GradScaler(enabled=(cfg.USE_AMP and self.device.type == "cuda"))
 
     @torch.no_grad()
@@ -201,16 +213,10 @@ def plot_rewards(rewards_history: List[float], log_dir: str, update: int, total_
         plt.plot(rewards_history, alpha=0.3, label="Episode reward", color='blue')
         
         # Add moving average
-        if len(rewards_history) >= 100:
-            window_size = 100
-            ma = np.convolve(rewards_history, np.ones(window_size) / window_size, mode="valid")
-            plt.plot(np.arange(window_size - 1, len(rewards_history)), ma, 
-                    label=f"Moving average ({window_size})", linewidth=2, color='orange')
-        elif len(rewards_history) >= 10:
-            window_size = 10
-            ma = np.convolve(rewards_history, np.ones(window_size) / window_size, mode="valid")
-            plt.plot(np.arange(window_size - 1, len(rewards_history)), ma, 
-                    label=f"Moving average ({window_size})", linewidth=2, color='orange')
+        window_size = 100 if len(rewards_history) >= 100 else 10
+        ma = np.convolve(rewards_history, np.ones(window_size) / window_size, mode="valid")
+        plt.plot(np.arange(window_size - 1, len(rewards_history)), ma, 
+                label=f"Moving average ({window_size})", linewidth=2, color='orange')
         
         plt.xlabel("Episode", fontsize=12)
         plt.ylabel("Reward", fontsize=12)
@@ -238,11 +244,6 @@ def plot_rewards(rewards_history: List[float], log_dir: str, update: int, total_
             plt.savefig(latest_path, bbox_inches="tight", dpi=dpi)
         
         plt.close()
-        
-        if is_final:
-            logger.info(f"Saved final rewards plot to {out_path}")
-        else:
-            logger.info(f"Saved rewards plot (latest: rewards_latest.png)")
             
     except Exception as e:
         logger.warning(f"Plotting failed: {e}")
@@ -284,7 +285,9 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
     if not csv_exists:
         csv_writer.writerow([
             'update', 'episodes_completed', 'avg_reward', 'avg_score',
-            'policy_loss', 'value_loss', 'entropy', 'clip_frac', 'kl'
+            'policy_loss', 'value_loss', 'entropy', 'clip_frac', 'kl',
+            'action_diversity', 'unique_states', 'explained_variance', 
+            'advantage_std', 'positive_adv_frac'
         ])
     
     episode_csv_file = open(episode_csv_path, 'a' if episode_csv_exists else 'w', newline='')
@@ -305,6 +308,14 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
 
     agent = PPOAgent(cfg, action_dim)
     
+    # Initialize exploration tracker
+    exploration_tracker = ExplorationTracker(
+        num_actions=action_dim,
+        num_envs=cfg.NUM_ENVS,
+        tracking_window=1000
+    )
+    logger.info(f"Initialized exploration tracker for {action_dim} actions")
+    
     # Resume from checkpoint if specified
     start_update = 1
     rewards_history: List[float] = []
@@ -313,7 +324,7 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
     
     if resume_from is not None and os.path.exists(resume_from):
         logger.info(f"Resuming from checkpoint: {resume_from}")
-        checkpoint = torch.load(resume_from, map_location=agent.device)
+        checkpoint = torch.load(resume_from, map_location=agent.device, weights_only=False)
         
         # Load model weights
         agent.net.load_state_dict(checkpoint["model"])
@@ -340,6 +351,11 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
         if "episode_count" in checkpoint:
             episode_count = checkpoint["episode_count"]
         
+        # Load exploration tracker if available
+        if "exploration_tracker" in checkpoint:
+            exploration_tracker.load_from_dict(checkpoint["exploration_tracker"])
+            logger.info("Loaded exploration tracker state")
+        
         # Load scaler state if available (for mixed precision)
         if "scaler" in checkpoint and cfg.USE_AMP:
             agent.scaler.load_state_dict(checkpoint["scaler"])
@@ -354,6 +370,12 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
     obs = torch.as_tensor(obs_np, device=agent.device)
 
     for update in range(start_update, cfg.TOTAL_UPDATES + 1):
+        # IMPROVED: Linear Learning Rate Decay with minimum floor
+        # Never go below 10% of original LR to maintain plasticity
+        frac = max(0.1, 1.0 - (update - 1.0) / cfg.TOTAL_UPDATES)
+        lrnow = frac * cfg.LR
+        agent.opt.param_groups[0]["lr"] = lrnow
+
         buf.reset()
 
         # Collect rollout
@@ -362,6 +384,10 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
                 actions, logp, values = agent.act(obs)
 
             actions_np = actions.cpu().numpy()
+            
+            # Track action distribution for exploration metrics
+            exploration_tracker.update_action_distribution(actions_np)
+            
             next_obs_np, r, terminated, truncated, infos = env.step(actions_np)
 
             rewards_t = torch.as_tensor(r, dtype=torch.float32, device=agent.device)
@@ -373,21 +399,43 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
             ep_returns += r
             ep_lengths += 1
             done_mask = terminated | truncated
+            
+            # Track state diversity
+            exploration_tracker.update_state_diversity(next_obs_np)
+            
             if np.any(done_mask):
                 for i, d in enumerate(done_mask):
                     if d:
                         episode_count += 1
+                        exploration_tracker.on_episode_end()  # Track episode-level exploration
                         clipped_reward = float(ep_returns[i])
                         episode_steps = int(ep_lengths[i])
                         
                         # Get raw score from info
                         raw_score = 0.0
-                        if 'final_info' in infos and infos['final_info'][i]:
-                            # Try to get episode_score (full game score) or raw_score (current score)
-                            if 'episode_score' in infos['final_info'][i]:
-                                raw_score = float(infos['final_info'][i]['episode_score'])
-                            elif 'raw_score' in infos['final_info'][i] and infos['final_info'][i]['raw_score'] is not None:
-                                raw_score = float(infos['final_info'][i]['raw_score'])
+                        
+                        # Debug: Log the full info structure for first few episodes
+                        if episode_count <= 3:
+                            logger.info(f"\n=== Episode {episode_count} Debug ===")
+                            logger.info(f"Available info keys: {list(infos.keys())}")
+                        
+                        # AsyncVectorEnv stores info with keys like 'episode_score' or '_episode_score'
+                        # Try to get raw score from various possible keys
+                        for key in ['episode_score', '_episode_score', 'final_raw_score', '_final_raw_score']:
+                            if key in infos and infos[key][i] is not None:
+                                try:
+                                    raw_score = float(infos[key][i])
+                                    if episode_count <= 3:
+                                        logger.info(f"Found score in '{key}': {raw_score}")
+                                    break
+                                except (TypeError, ValueError):
+                                    continue
+                        
+                        # Fallback: estimate from scaled reward (clipped_reward is scaled by 0.1)
+                        if raw_score == 0.0 and clipped_reward > 0:
+                            raw_score = clipped_reward * 10.0  # Undo the 0.1x scaling
+                            if episode_count <= 3:
+                                logger.info(f"Using fallback calculation: {clipped_reward} * 10 = {raw_score}")
                         
                         rewards_history.append(clipped_reward)
                         scores_history.append(raw_score)
@@ -417,6 +465,10 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
 
         # Compute GAE/returns
         advantages, returns = compute_gae(cfg, rewards_batch, values_batch, dones_batch, last_values)
+        
+        # Track advantage and value statistics for exploration analysis
+        exploration_tracker.update_advantage_stats(advantages)
+        exploration_tracker.update_value_stats(values_batch, returns)
         
         # Flatten
         T, B = cfg.ROLLOUT_STEPS, cfg.NUM_ENVS
@@ -450,6 +502,14 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
 
                 with torch.cuda.amp.autocast(enabled=(cfg.USE_AMP and agent.device.type == "cuda")):
                     new_logp, entropy, new_values = agent.evaluate(mb_obs, mb_actions)
+                    
+                    # Track per-action entropy for exploration analysis
+                    # Get logits to compute per-action entropy
+                    with torch.no_grad():
+                        logits, _ = agent.net(mb_obs)
+                        probs = torch.softmax(logits, dim=-1)
+                        exploration_tracker.update_per_action_entropy(probs)
+                    
                     ratio = torch.exp(new_logp - mb_old_logp)
                     surr1 = ratio * mb_adv
                     surr2 = torch.clamp(ratio, 1.0 - cfg.CLIP_EPS, 1.0 + cfg.CLIP_EPS) * mb_adv
@@ -484,6 +544,10 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
             recent = max(1, num_samples // cfg.MINIBATCH_SIZE)
             if np.mean(kls[-recent:]) > cfg.TARGET_KL:
                 break
+        
+        # Track overall entropy for this update
+        avg_entropy = np.mean(entropies)
+        exploration_tracker.update_entropy(avg_entropy)
 
         # Logging
         if update % cfg.LOG_INTERVAL == 0:
@@ -494,7 +558,10 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
             avg_ep_reward = float(np.mean(reward_window)) if reward_window else 0.0
             avg_ep_score = float(np.mean(score_window)) if score_window else 0.0
             
-            # Write to CSV
+            # Get exploration metrics
+            exploration_stats = exploration_tracker.get_summary_stats()
+            
+            # Write to CSV with exploration metrics
             csv_writer.writerow([
                 update,
                 len(rewards_history),
@@ -504,21 +571,39 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
                 np.mean(value_losses),
                 np.mean(entropies),
                 np.mean(clip_fracs),
-                np.mean(kls)
+                np.mean(kls),
+                exploration_stats['action_diversity_score'],
+                exploration_stats['unique_states_window'],
+                exploration_stats['explained_variance'],
+                exploration_stats['advantage_std'],
+                exploration_stats['positive_advantage_frac']
             ])
             csv_file.flush()
             
             logger.info(
                 f"Update {update}/{cfg.TOTAL_UPDATES} | "
-                f"Episodes: {len(rewards_history)} | "
+                f"LR: {lrnow:.2e} | "
                 f"Avg Reward: {avg_ep_reward:.1f} | "
                 f"Avg Score: {avg_ep_score:.1f} | "
                 f"Policy Loss: {np.mean(policy_losses):.4f} | "
                 f"Value Loss: {np.mean(value_losses):.4f} | "
                 f"Entropy: {np.mean(entropies):.3f} | "
-                f"ClipFrac: {np.mean(clip_fracs):.3f} | "
                 f"KL: {np.mean(kls):.4f}"
             )
+            
+            # Log exploration metrics less frequently to avoid clutter
+            if update % (cfg.LOG_INTERVAL * 10) == 0:
+                logger.info(
+                    f"  └─ Exploration: "
+                    f"Action Diversity: {exploration_stats['action_diversity_score']:.3f} | "
+                    f"Unique States: {exploration_stats['unique_states_window']} | "
+                    f"Explained Var: {exploration_stats['explained_variance']:.3f} | "
+                    f"Adv Std: {exploration_stats['advantage_std']:.3f}"
+                )
+        
+        # Detailed exploration summary every 100 updates
+        if update % 100 == 0:
+            exploration_tracker.log_summary(update, logger)
 
         if update % cfg.SAVE_INTERVAL == 0:
             path = os.path.join(cfg.MODEL_DIR, f"agent_update_{update}.pt")
@@ -530,6 +615,7 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
                 "rewards_history": rewards_history,
                 "scores_history": scores_history,
                 "episode_count": episode_count,
+                "exploration_tracker": exploration_tracker.save_to_dict(),
                 "cfg": cfg.__dict__
             }, path)
             logger.info(f"Saved checkpoint to {path}")
@@ -547,6 +633,7 @@ def train(cfg: PPOConfig = None, resume_from: str = None):
         "rewards_history": rewards_history,
         "scores_history": scores_history,
         "episode_count": episode_count,
+        "exploration_tracker": exploration_tracker.save_to_dict(),
         "cfg": cfg.__dict__
     }, final_path)
     logger.info(f"Saved final model to {final_path}")
@@ -585,7 +672,7 @@ def play(cfg: PPOConfig, model_path: str, episodes: int = 5):
             dist = Categorical(logits=logits)
             action = dist.sample().item()
             obs, r, terminated, truncated, info = env.step(action)
-            total_reward += r  # This is the clipped reward
+            total_reward += r  # This is the scaled reward now
             steps += 1
             done = terminated or truncated
             
@@ -593,7 +680,7 @@ def play(cfg: PPOConfig, model_path: str, episodes: int = 5):
             if 'raw_score' in info:
                 raw_score = info['raw_score']
         
-        logger.info(f"Episode {ep+1}: Clipped Reward={total_reward:.1f}, Raw Score={raw_score:.1f}, Steps={steps}")
+        logger.info(f"Episode {ep+1}: Scaled Reward={total_reward:.1f}, Raw Score={raw_score:.1f}, Steps={steps}")
     env.close()
 
 def train_ppo_agent(agent_class, config: PPOConfig, render_human: bool = False):
