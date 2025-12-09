@@ -1,4 +1,3 @@
-# deep_ql_agent.py
 from __future__ import annotations
 import random
 from typing import Optional
@@ -9,7 +8,7 @@ import torch.nn as nn
 import torch.optim as optim
 import cv2
 
-# BaseAgent compatibility
+# try to import BaseAgent; fall back to a stub if not available
 try:
     from agents.base import BaseAgent
 except Exception:
@@ -21,7 +20,7 @@ except Exception:
         def load(self, filepath): ...
 
 
-# Observation conversion
+# convert observation to normalized CHW tensor
 def chw_from_obs(obs: np.ndarray) -> torch.Tensor:
     """
     Convert observation to CHW float tensor in [0, 1].
@@ -33,14 +32,17 @@ def chw_from_obs(obs: np.ndarray) -> torch.Tensor:
     """
     arr = np.asarray(obs)
 
+    # stacked frames or single channel 
     # (4, 84, 84) or (1, 84, 84)
     if arr.ndim == 3 and arr.shape[-2:] == (84, 84):
         return torch.as_tensor(arr, dtype=torch.float32) / 255.0
 
+    # single grayscale frame 
     # (84, 84)
     if arr.ndim == 2:
         return torch.as_tensor(arr, dtype=torch.float32).unsqueeze(0) / 255.0
 
+    # RGB frame -> grayscale
     # (H, W, 3)
     if arr.ndim == 3 and arr.shape[2] == 3:
         gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
@@ -50,10 +52,11 @@ def chw_from_obs(obs: np.ndarray) -> torch.Tensor:
     raise ValueError(f"Unsupported observation shape: {arr.shape}")
 
 
-# CNN Q-Network
+# CNN Q-Network for 84x84 image input
 class CNNQ(nn.Module):
     def __init__(self, in_channels: int, n_actions: int):
         super().__init__()
+        # convolutional feature extractor
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels, 32, 8, 4),
             nn.ReLU(),
@@ -62,10 +65,12 @@ class CNNQ(nn.Module):
             nn.Conv2d(64, 64, 3, 1),
             nn.ReLU(),
         )
+        # compute flattened size using dummy input
         with torch.no_grad():
             dummy = torch.zeros(1, in_channels, 84, 84)
             n_flat = self.conv(dummy).view(1, -1).size(1)
 
+        # fully connected head to output Q-values
         self.head = nn.Sequential(
             nn.Linear(n_flat, 512),
             nn.ReLU(),
@@ -73,6 +78,7 @@ class CNNQ(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # allow single observation (C, H, W) or batch (B, C, H, W)
         if x.ndim == 3:
             x = x.unsqueeze(0)
         x = self.conv(x)
@@ -80,7 +86,7 @@ class CNNQ(nn.Module):
         return self.head(x)
 
 
-# Replay Buffer
+# simple replay bugger for experience replay 
 class ReplayBuffer:
     def __init__(self, capacity: int, device: torch.device):
         self.capacity = capacity
@@ -88,12 +94,14 @@ class ReplayBuffer:
         self.idx = 0
         self.full = False
 
+        # store raw numpy observations and transition data
         self.s = [None] * capacity
         self.a = np.zeros(capacity, dtype=np.int64)
         self.r = np.zeros(capacity, dtype=np.float32)
         self.s2 = [None] * capacity
         self.d = np.zeros(capacity, dtype=np.bool_)
 
+    # add one transition to the buffer
     def push(self, s, a, r, s2, done):
         i = self.idx
         self.s[i] = np.asarray(s)
@@ -105,9 +113,11 @@ class ReplayBuffer:
         if self.idx == 0:
             self.full = True
 
+    # current number of stored transitions
     def __len__(self):
         return self.capacity if self.full else self.idx
 
+    # sample a random batch and convert to tensors
     def sample(self, batch_size: int):
         idxs = np.random.randint(0, len(self), size=batch_size)
         s = torch.stack([chw_from_obs(self.s[i]) for i in idxs]).to(self.device)
@@ -118,95 +128,114 @@ class ReplayBuffer:
         return s, a, r, s2, d
 
 
-# DQL Agent
+# DQL Agent (DQN for MsPacman with frame stacking)
 class DQLAgent(BaseAgent):
     def __init__(self, action_space, config):
         super().__init__(action_space, config)
         self.action_space = action_space
         self.cfg = config
+        
+        # force cpu
         self.cfg.device = "cpu"
         self.device = torch.device("cpu")
 
-
+        # networks / optimizer / buffer
         self.q: Optional[nn.Module] = None
         self.q_target: Optional[nn.Module] = None
         self.opt: Optional[optim.Optimizer] = None
         self.buffer: Optional[ReplayBuffer] = None
+        
+        # huber loss
         self.loss_fn = nn.SmoothL1Loss()
 
-        self.step_count = 0  # counts env steps
+        # counts environemnt steps for scheduling
+        self.step_count = 0 
 
-    # Act
+    # choose action using ε-greedy policy
     def get_action(self, observation):
+        # initialize networks on first observation
         if self.q is None:
             self._init_from_obs(observation)
 
         eps = self._epsilon()
 
-        # ε-greedy
+        # exploratioon with probability ε
         if random.random() < eps:
             return self.action_space.sample()
 
+        # exploitation: take argmax Q(s,a)
         x = chw_from_obs(observation).to(self.device)
         with torch.no_grad():
             q = self.q(x)
         return int(torch.argmax(q, dim=1).item())
 
-    # Train
+    # store transition and update networks
     def update(self, state, action, reward, next_state, done):
+        # initialize on first update if needed
         if self.buffer is None:
             self._init_from_obs(state)
             
         self.step_count += 1
 
+        # add to replay buffer
         self.buffer.push(state, action, reward, next_state, done)
 
-        # Warmup
+        # wait until enough samples
         if len(self.buffer) < self.cfg.learning_starts:
             return
 
-        # Train only every train_freq steps
+        # only train every train_freq steps
         if self.step_count % self.cfg.train_freq != 0:
             return
 
+        # sample a minibatch
         s, a, r, s2, d = self.buffer.sample(self.cfg.batch_size)
 
+        # compute target Q-values
         with torch.no_grad():
             if self.cfg.double_dqn:
+                # doubel DQN: actions from online network, values from target network
                 best_next = torch.argmax(self.q(s2), dim=1)
                 q_next = self.q_target(s2).gather(1, best_next.unsqueeze(1)).squeeze(1)
             else:
+                # standard dqn: max over target Q-vals
                 q_next = self.q_target(s2).max(1).values
 
+            # bellman target
             target = r + (1.0 - d) * self.cfg.gamma * q_next
 
+        # q(s,a) for chosen actions
         q_sa = self.q(s).gather(1, a.unsqueeze(1)).squeeze(1)
         loss = self.loss_fn(q_sa, target)
 
+        # optimize Q-network
         self.opt.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(self.q.parameters(), self.cfg.max_grad_norm)
         self.opt.step()
 
-        # Target network update
+        # update target network periodically
         if self.step_count % self.cfg.target_update_freq == 0:
             self.q_target.load_state_dict(self.q.state_dict())
 
-    # Initialization
+    # build networks and replay buffer from first obersvation
     def _init_from_obs(self, obs):
         x = chw_from_obs(obs)
-        c = x.shape[0]  # channels (should be 4 for MsPacman + FrameStack)
+        c = x.shape[0]  # number of channels
 
+        # online and target Q-networks
         self.q = CNNQ(c, self.action_space.n).to(self.device)
         self.q_target = CNNQ(c, self.action_space.n).to(self.device)
         self.q_target.load_state_dict(self.q.state_dict())
         self.q_target.eval()
 
+        # optimizer and replay buffer
         self.opt = optim.AdamW(self.q.parameters(), lr=self.cfg.lr, amsgrad=True)
         self.buffer = ReplayBuffer(self.cfg.buffer_size, self.device)
 
+    # episolon schedule for ε-greedy
     def _epsilon(self):
-        """Exponential decay is more stable for Atari DQN."""
+        """Exponential epsilon decay."""
         step = self.step_count
         eps_start = self.cfg.eps_start
         eps_final = self.cfg.eps_final
@@ -214,14 +243,15 @@ class DQLAgent(BaseAgent):
 
         return eps_final + (eps_start - eps_final) * np.exp(-step / decay)
 
-    # Saving / loading (simple: weights only, CPU-friendly)
+    # save only the online Q-network parameters
     def save(self, path: str):
         if self.q is None:
             raise RuntimeError("Cannot save before network is initialized.")
         torch.save(self.q.state_dict(), path)
 
+    # load Q-network weights and rebuild target network
     def load(self, path: str):
-        # Fixed 4-channel input for MsPacman (FrameStack(4))
+        # assume fixed 4-channel input for MsPacman (FrameStack(4))
         obs_channels = 4
         self.q = CNNQ(obs_channels, self.action_space.n).to(self.device)
         self.q_target = CNNQ(obs_channels, self.action_space.n).to(self.device)
