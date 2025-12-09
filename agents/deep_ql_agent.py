@@ -1,5 +1,3 @@
-
-# deep_ql_agent.py
 from __future__ import annotations
 
 import argparse
@@ -13,12 +11,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-# -------- BaseAgent compatibility --------
+# try important BaseAgent, use stub if not available
 try:
-    # Use the project's BaseAgent if available
     from agents.base import BaseAgent  # type: ignore
 except Exception:
-    # Fallback for running this file standalone
     class BaseAgent:
         def __init__(self, action_space, config=None): pass
         def get_action(self, observation): ...
@@ -26,10 +22,7 @@ except Exception:
         def save(self, filepath): ...
         def load(self, filepath): ...
 
-# ====================================================
-# Utilities
-# ====================================================
-
+# convert observation to tensor (CHW if image)
 def chw_from_obs(obs: np.ndarray) -> torch.Tensor:
     """
     Convert an observation to a torch.FloatTensor.
@@ -41,28 +34,22 @@ def chw_from_obs(obs: np.ndarray) -> torch.Tensor:
     if obs is None:
         raise ValueError("Observation is None")
     arr = np.asarray(obs)
-    if arr.ndim == 1:  # vector
+    if arr.ndim == 1:
         t = torch.as_tensor(arr, dtype=torch.float32)
         return t
-    if arr.ndim == 2:  # grayscale image -> 1xHxW
+    if arr.ndim == 2:
         t = torch.as_tensor(arr, dtype=torch.float32).unsqueeze(0)
         return t / 255.0 if t.max() > 1.0 else t
     if arr.ndim == 3:
-        # HWC or CHW?
         if arr.shape[0] in (1, 3, 4) and arr.shape[0] < arr.shape[-1]:
-            # Looks like CHW already (C,H,W) with small C
             t = torch.as_tensor(arr, dtype=torch.float32)
         else:
-            # Assume HWC -> CHW
             t = torch.as_tensor(arr, dtype=torch.float32).permute(2, 0, 1)
         return t / 255.0 if t.max() > 1.0 else t
     raise ValueError(f"Unsupported obs shape: {arr.shape}")
 
 
-# ====================================================
-# Q-Networks
-# ====================================================
-
+# CNN Q-network for images
 class CNNQ(nn.Module):
     def __init__(self, in_channels: int, n_actions: int, image_size: Tuple[int, int] | None = None):
         super().__init__()
@@ -93,7 +80,7 @@ class CNNQ(nn.Module):
         x = torch.flatten(x, 1)
         return self.head(x)
 
-
+# MLP Q-network for vector states
 class MLPQ(nn.Module):
     def __init__(self, in_dim: int, n_actions: int):
         super().__init__()
@@ -109,10 +96,7 @@ class MLPQ(nn.Module):
         return self.net(x)
 
 
-# ====================================================
-# Replay Buffer
-# ====================================================
-
+# simple replay buffer
 class ReplayBuffer:
     def __init__(self, capacity: int, device: torch.device):
         self.capacity = capacity
@@ -140,6 +124,7 @@ class ReplayBuffer:
     def __len__(self):
         return self.capacity if self.full else self.idx
 
+    # sample a minibatch
     def sample(self, batch_size: int):
         n = len(self)
         idxs = np.random.randint(0, n, size=batch_size, dtype=np.int32)
@@ -151,10 +136,7 @@ class ReplayBuffer:
         return s, a, r, s2, d
 
 
-# ====================================================
-# Config + Agent
-# ====================================================
-
+# DQN config
 @dataclass
 class DQNConfig:
     gamma: float = 0.99
@@ -170,27 +152,25 @@ class DQNConfig:
     max_grad_norm: float = 10.0
     double_dqn: bool = True
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
-    # Optional hints for images
     is_image: Optional[bool] = None
-    image_size: Optional[Tuple[int, int]] = None  # (H, W) if known
+    image_size: Optional[Tuple[int, int]] = None
 
-
+# DQN Agent
 class DQNAgent(BaseAgent):
 
     """
-    Drop-in DQN that matches your BaseAgent API:
+    Drop-in DQN that matches BaseAgent API:
       - get_action(observation) -> int
       - update(state, action, reward, next_state, needs_to_reset) -> dict
       - save(filepath), load(filepath)
 
-    Works with vector or image observations.
+    Works with vector / image observations.
     """
     def __init__(self, action_space, config=None):
         super().__init__(action_space, config)
         self.cfg = DQNConfig()
         self.device = torch.device(self.cfg.device)
 
-        # Lazy init after first observation
         self.q: Optional[nn.Module] = None
         self.q_target: Optional[nn.Module] = None
         self.opt: Optional[optim.Optimizer] = None
@@ -198,9 +178,9 @@ class DQNAgent(BaseAgent):
         self.buffer: Optional[ReplayBuffer] = None
 
         self.step_count = 0
-        self._pending_ckpt = None  # for load-before-init
+        self._pending_ckpt = None  
 
-    # ---------- BaseAgent API ----------
+    # pick action with episilon-greedy
     def get_action(self, observation):
         if self.q is None:
             self._init_from_obs(observation)
@@ -216,6 +196,7 @@ class DQNAgent(BaseAgent):
             a = int(torch.argmax(q, dim=1).item())
         return a
 
+    # store transition and update network
     def update(self, state, action, reward, next_state, needs_to_reset):
         if self.buffer is None:
             self._init_from_obs(state)
@@ -223,16 +204,15 @@ class DQNAgent(BaseAgent):
         done = bool(needs_to_reset)
         self.buffer.push(state, action, reward, next_state, done)
 
-        # Warmup
         if len(self.buffer) < self.cfg.learning_starts:
             return {}
 
-        # Train on schedule
         if self.step_count % self.cfg.train_freq != 0:
             return {}
-
+        
         s, a, r, s2, d = self.buffer.sample(self.cfg.batch_size)
-
+        
+        # compute target Q-values
         with torch.no_grad():
             if self.cfg.double_dqn:
                 a2 = torch.argmax(self.q(s2), dim=1)
@@ -241,6 +221,7 @@ class DQNAgent(BaseAgent):
                 q_next = self.q_target(s2).max(1).values
             target = r + (1.0 - d) * self.cfg.gamma * q_next
 
+        # compute loss
         q_sa = self.q(s).gather(1, a.unsqueeze(1)).squeeze(1)
         loss = self.loss_fn(q_sa, target).mean()
 
@@ -249,12 +230,13 @@ class DQNAgent(BaseAgent):
         nn.utils.clip_grad_norm_(self.q.parameters(), self.cfg.max_grad_norm)
         self.opt.step()
 
-        # Target sync
+        # periodically update target network
         if self.step_count % self.cfg.target_update_freq == 0:
             self.q_target.load_state_dict(self.q.state_dict())
 
         return {"loss": float(loss.item()), "epsilon": self._epsilon(), "buffer": len(self.buffer)}
 
+    # save model checkpoint
     def save(self, filepath: str):
         if self.q is None:
             raise RuntimeError("Agent not initialized; call get_action() once before save.")
@@ -266,17 +248,16 @@ class DQNAgent(BaseAgent):
             "step_count": self.step_count,
         }, filepath)
 
+    # load checkpoint
     def load(self, filepath: str):
         ckpt = torch.load(filepath, map_location=self.device)
-        # merge cfg (preserve current defaults where not present)
         self.cfg = DQNConfig(**{**self.cfg.__dict__, **ckpt.get("cfg", {})})
         self.step_count = ckpt.get("step_count", 0)
-        # If models aren't built yet, defer restoration
         self._pending_ckpt = ckpt
         if self.q is not None:
             self._restore_from_ckpt()
 
-    # ---------- Internals ----------
+    # episolon schedule
     def _epsilon(self):
         c = self.cfg
         if self.step_count >= c.eps_decay_steps:
@@ -284,9 +265,10 @@ class DQNAgent(BaseAgent):
         frac = self.step_count / c.eps_decay_steps
         return c.eps_start + frac * (c.eps_final - c.eps_start)
 
+    # build networds once obs shape is known
     def _init_from_obs(self, obs):
         x = chw_from_obs(obs).to(self.device)
-        # Decide image vs vector
+
         is_image = self.cfg.is_image
         if is_image is None:
             is_image = (x.ndim == 3 and min(x.shape[-2:]) > 1)
@@ -305,10 +287,10 @@ class DQNAgent(BaseAgent):
         self.opt = optim.AdamW(self.q.parameters(), lr=self.cfg.lr, amsgrad=True)
         self.buffer = ReplayBuffer(self.cfg.buffer_size, self.device)
 
-        # If a checkpoint was loaded before shapes were known, restore now
         if self._pending_ckpt is not None:
             self._restore_from_ckpt()
 
+    # retore checkpoint
     def _restore_from_ckpt(self):
         ckpt = self._pending_ckpt
         if ckpt is None:
@@ -321,10 +303,7 @@ class DQNAgent(BaseAgent):
             self._pending_ckpt = None
 
 
-# ====================================================
-# Optional CLI for quick testing
-# ====================================================
-
+# simple CLI test loop
 def _run_cli():
     """
     Minimal training loop for sanity checks.
