@@ -4,14 +4,6 @@ import argparse
 from main import train as main_train, play as main_play
 from logging import getLogger
 
-from agents.random_agent import RandomAgent
-from config.random_config import RandomConfig
-from agents.deep_ql_agent import DQNAgent, DQNConfig
-
-# PPO imports
-from train_ppo import train_ppo_agent, play_ppo_agent, train as ppo_train
-from config.ppo_config import PPOConfig
-
 # Disable the SDL audio driver warnings so there's no console warning output fo rit
 os.environ['SDL_AUDIODRIVER'] = 'dummy'
 logger = getLogger(__name__)
@@ -35,12 +27,27 @@ def main():
     play_func = main_play
 
     if args.agent.lower() == 'random':
+        from agents.random_agent import RandomAgent
+        from config.random_config import RandomConfig
+
         agent_to_run = RandomAgent
         config_to_use = RandomConfig()
     elif args.agent.lower() == 'dqn':
+        from agents.deep_ql_agent import DQNAgent, DQNConfig
+
         agent_to_run = DQNAgent
         config_to_use = DQNConfig()
+    elif args.agent.lower() == 'qlearning':
+        from agents.ql_agent import QLearningAgent
+        from config.ql_config import QLearningConfig
+
+        agent_to_run = QLearningAgent
+        config_to_use = QLearningConfig()
     elif args.agent.lower() == 'ppo':
+        # PPO imports
+        from train_ppo import train_ppo_agent, play_ppo_agent, train as ppo_train
+        from config.ppo_config import PPOConfig
+
         agent_to_run = None  # PPO uses its own internal agent
         config_to_use = PPOConfig()
         train_func = train_ppo_agent
