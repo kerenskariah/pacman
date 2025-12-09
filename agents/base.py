@@ -24,3 +24,13 @@ class BaseAgent(ABC):
     def load(self, filepath):
         """Load agent from disk."""
         pass
+
+    # used only by QL
+    def state_dict(self):
+        pass
+
+    def load_state(self, state):
+        pass
+
+    def get_stats(self):
+        return {}

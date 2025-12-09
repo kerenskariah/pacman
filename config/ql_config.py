@@ -25,8 +25,8 @@ class QLearningConfig(BaseConfig):
     
     # Logging
     LOG_INTERVAL: int = 100
-    SAVE_INTERVAL: int = 1000000000  # effectively disable periodic ep checkpoints
     BEST_AVG_WINDOW: int = 100  # choose best model by 100-episode moving average
+    SAVE_INTERVAL: int = 1000000000
     
     # Paths
     MODEL_DIR: str = "models/qlearning"

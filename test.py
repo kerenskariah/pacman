@@ -33,10 +33,11 @@ def main():
         agent_to_run = RandomAgent
         config_to_use = RandomConfig()
     elif args.agent.lower() == 'dqn':
-        from agents.deep_ql_agent import DQNAgent, DQNConfig
+        from agents.deep_ql_agent import DQLAgent
+        from config.dql_config import DQLConfig
 
-        agent_to_run = DQNAgent
-        config_to_use = DQNConfig()
+        agent_to_run = DQLAgent
+        config_to_use = DQLConfig()
     elif args.agent.lower() == 'qlearning':
         from agents.ql_agent import QLearningAgent
         from config.ql_config import QLearningConfig

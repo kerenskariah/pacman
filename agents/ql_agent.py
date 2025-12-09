@@ -15,8 +15,7 @@ class RamFeaturizer:
     
     def __call__(self, obs: np.ndarray) -> Tuple[int, ...]:
         if obs.ndim == 3:
-            # If we get an RGB image instead of RAM, we need to handle it
-            # This shouldn't happen with proper env setup, but defensive
+            # If we get an RGB image instead of RAM, throw error
             raise ValueError("Expected RAM observation (1D), got image observation (3D). "
                            "Use ALE/MsPacman-ram-v5 or similar RAM variant.")
         
@@ -38,7 +37,7 @@ class QLearningAgent(BaseAgent):
         # Q-table: dict mapping (state, action) -> Q-value
         self.q_table: Dict[Tuple, Dict[int, float]] = defaultdict(lambda: defaultdict(float))
         
-        # Hyperparameters
+        # Hyperparams
         self.alpha = getattr(config, 'ALPHA', 0.1)  # learning rate
         self.gamma = getattr(config, 'GAMMA', 0.99)  # discount factor
         self.epsilon_start = getattr(config, 'EPSILON_START', 1.0)
@@ -68,7 +67,7 @@ class QLearningAgent(BaseAgent):
             # Explore: random action
             return int(self.rng.integers(0, self.n_actions))
         else:
-            # Exploit: best action from Q-table
+            # Best action from Q-table
             q_values = self.q_table[state]
             
             if not q_values:

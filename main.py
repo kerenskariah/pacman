@@ -4,20 +4,17 @@ import os
 import logging
 import numpy as np
 import csv
-import ale_py
 import gymnasium as gym
+import ale_py
 from agents.base import BaseAgent
 from config.base import BaseConfig
-from gymnasium.wrappers import AtariPreprocessing, FrameStack
+from gymnasium.wrappers import AtariPreprocessing
 import imageio
 import cv2
 import matplotlib.pyplot as plt
 
 logging.basicConfig(level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
-
-logger.info("Registering environment.")
-gym.register_envs(ale_py)
 
 # Train the agent based on provided config
 def train(agent_class: type[BaseAgent], config: BaseConfig, render_human: bool = False):
@@ -58,7 +55,7 @@ def train(agent_class: type[BaseAgent], config: BaseConfig, render_human: bool =
         else:
             env = gym.make(game_environment, render_mode="rgb_array", obs_type="ram")
     else:
-        # Image-based agents (e.g., DQN): use Atari preprocessing and frame stacking
+        # Image-based agents (e.g., DQN): use Atari preprocessing
         if render_human:
             env = gym.make(game_environment, render_mode="human", frameskip=1)
         else:
@@ -71,7 +68,6 @@ def train(agent_class: type[BaseAgent], config: BaseConfig, render_human: bool =
             frame_skip=4,
             terminal_on_life_loss=True
         )
-        env = FrameStack(env, 4)
 
     logger.info("Created training environment.")
 
@@ -252,7 +248,7 @@ def play(agent_class: type[BaseAgent], config: BaseConfig, model_path: str, num_
         # RAM-based agents: raw RAM, no image preprocessing
         env = gym.make(game_environment, render_mode="human", obs_type="ram")
     else:
-        # Image-based agents: Atari preprocessing and frame stacking
+        # Image-based agents: Atari preprocessing
         env = gym.make(game_environment, render_mode="human", frameskip=1)
 
         env = AtariPreprocessing(
@@ -262,7 +258,6 @@ def play(agent_class: type[BaseAgent], config: BaseConfig, model_path: str, num_
             frame_skip=4,
             terminal_on_life_loss=True
         )
-        env = FrameStack(env, 4)
 
     agent = agent_class(env.action_space, config)
     
