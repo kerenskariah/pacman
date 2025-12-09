@@ -15,7 +15,7 @@ class PPOConfig(BaseConfig):
     TOTAL_UPDATES: int = 4000          # number of PPO updates
     ROLLOUT_STEPS: int = 128           # steps per env before one PPO update
     PPO_EPOCHS: int = 4                # SGD passes over the collected batch
-    MINIBATCH_SIZE: int = 256
+    MIN_BATCH_SIZE: int = 256
     MAX_GRAD_NORM: float = 0.5
 
     # Loss / algo
@@ -34,7 +34,7 @@ class PPOConfig(BaseConfig):
     LOG_INTERVAL: int = 1             # in updates
     SAVE_INTERVAL: int = 10           # in updates
     MODEL_DIR: str = "models/ppo"
-    LOG_DIR: str = "results/ppo"
+    LOG_DIR: str = "logs/ppo"
 
     # Misc
     DEVICE: str = "cuda"  # Will be set properly in code
