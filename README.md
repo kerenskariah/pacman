@@ -14,21 +14,20 @@ This unpredictability forces agents to generalize, adapt, and balance survival w
 
 ## Environment
 
-We use the **Atari Learning Environment (ALE)** together with **Gymnasium** as our RL environment. These frameworks provide:
+We use the **Atari Learning Environment (ALE)** and **Gymnasium** to create a consistent, flexible environment for training and evaluating agents.
 
-- Standard RL interfaces (`reset`, `step`)
-- Support for Atari preprocessing
-- Integration with GPU-accelerated training setups  
-- Simplified switching between agents without modifying the environment logic
+Gymnasium/ALE provide:
 
-To improve training stability and reduce variance, we incorporate:
-
+- A standard RL API (`reset`, `step`)
+- Access to screen frames
+- Access to raw RAM state
 - Frame skipping (4)
 - Frame stacking (4)
 - Sticky actions (25%)
 - Reward clipping (-1, 0, +1)
 
-These match the preprocessing pipeline used in many deep RL Atari benchmarks.
+These preprocessing steps ensure stability, reduce redundancy, help agents understand movement, and improve training efficiency.
+
 
 ## Prerequisites
 
@@ -87,6 +86,7 @@ pip freeze > requirements.txt
 ├── requirements.txt
 ├── train_ppo.py                # PPO training script
 ├── train_dql.py                # DQN / Deep Q training script
+├── train_ql.py                 # Q-Learning training script
 ├── test.py                     # Simple environment or baseline test script
 ├── play_5_ppo.sh               # Run PPO agent for 5 evaluation episodes
 │
@@ -112,10 +112,14 @@ pip freeze > requirements.txt
 │       └── agent_latest.pt
 │
 ├── results/
+│   ├── dql/
+│   │   ├── learning_curve.png
+│   │   ├── epsilon_decay.png
 │   ├── qlearning/
 │   │   ├── rewards.png
 │   │   └── episode_log.csv
 │   └── ppo/
+│       └── score_progression.png
 │       └── rewards_latest.png
 │
 ├── reports/
@@ -195,31 +199,91 @@ python test.py
 bash play_5_ppo.sh
 ```
 
+# Results
 
-## Results (High-Level Summary)
+Our experiments evaluated three main learning-based agents: **Q-Learning**, **Deep Q-Learning (DQN)**, and **PPO**. 
 
-Across thousands of training episodes:
+## Deep Q-Learning
 
-* **Random Agent**: Near-zero scores; used for debugging.
-* **Q-Learning**: Learns pellet collection but plateaus quickly.
-* **DQN**: Learns strategic behavior but with unstable reward curves.
-* **PPO**: Most reliable learning; smooth upward trend in moving-average reward; best overall performance.
+### **Epsilon Decay Schedule**
+The DQN agent starts fully exploratory (ε = 1.0) and smoothly decays to ~0.1, encouraging more stable exploitation later in training.
 
-Plots are available under:
+![Epsilon Decay](results/dql/epsilon_decay.png)
 
-```
-results/qlearning/
-results/ppo/
-reports/project_check_in/
-```
+---
 
-## Future Improvements
+### **Learning Curve**
+The DQN agent demonstrates meaningful but unstable learning behavior.
+- Raw episode rewards fluctuate heavily, typical for Ms. Pac-Man.
+- The 20-episode moving average shows a gradual upward trend as the agent learns reactive ghost avoidance and pellet clearing.
 
-* Improve PPO CNN architecture
-* Finish Dueling DQN implementation
-* Add reward scaling (log rewards)
-* Add full UI (Streamlit or Next.js) for interactive model demos
-* Add more robust experiment management and logging
+![DQN Learning Curve](results/dql/learning_curve.png)
+
+
+## Q-Learning
+
+Q-Learning over Atari RAM learns simple short-term strategies but plateaus early because the RAM space is large and noisy.
+
+![Q-Learning Rewards](results/qlearning/rewards.png)
+
+The `episode_log.csv` contains reward and timestep data for every episode.
+
+## PPO
+
+PPO was the **strongest-performing algorithm** across all experiments, showing gradual and reliable improvement due to:
+- clipped objective function,
+- stable actor–critic optimization,
+- reward clipping,
+- and frame preprocessing.
+
+### **PPO Moving-Average Reward Progression**
+This plot shows PPO’s stability: despite high per-episode variance, the smoothed moving average grows steadily across ~8,000 episodes.
+
+![PPO Rewards](results/ppo/rewards_latest.png)
+
+### **PPO Score Progression**
+
+- Sharp upward trend over **10,000 training updates**
+- Early performance near **300–400 points**
+- Peak score near **2657**
+- Final stabilized performance around **2300–2400**
+
+![PPO Score Progression](results/ppo/score_progression.png)
+
+
+## PPO Reward + Episode-Length Behavior
+
+This figure highlights:
+- Per-episode reward variance (top)
+- Number of steps survived per episode (bottom)
+
+Both metrics trend upward, indicating improved policy stability and survival time.
+
+![Reward + Steps](results/ppo/reward_steps.png)
+
+### Why PPO Works Better
+
+* Clipped objective prevents destructive updates.
+* Actor-critic structure stabilizes learning.
+* Reward clipping avoids large gradient explosions.
+
+### Behavioral Improvements
+
+* Safer navigation through the maze
+* More consistent ghost avoidance
+* Better exploitation of scoring opportunities (dense pellets, fruits)
+
+Overall PPO shows **the most reliable and meaningful learning** of all implemented agents.
+
+
+# Future Improvements
+
+* Improved CNN architectures for PPO
+* Complete Dueling DQN
+* Reward scaling (log rewards)
+* Vectorized environments to train multiple games in parallel
+* UI/dashboard for visualizing agent play
+* More robust error handling
 
 ## Contributors
 
