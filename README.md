@@ -277,12 +277,12 @@ Overall PPO shows **the most reliable and meaningful learning** of all implement
 
 ## Contributors
 
-* Joanne Lai
-* Ann Le
-* Grace Zhang
-* Haylie Tan
-* Sandeep Reehal
-* Keren Skariah
-* Shreyans Porwal
-* Ian Wong
-* Sathvik Parasa
+*  Ann Le
+*  Grace Zhang
+*  Haylie Tan
+*  Ian Wong
+*  Joanne Lai
+*  Keren Skariah
+*  Sandeep Reehal
+*  Sathvik Parasa
+*  Shreyans Porwal
