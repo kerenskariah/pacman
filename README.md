@@ -33,7 +33,7 @@ These match the preprocessing pipeline used in many deep RL Atari benchmarks.
 ## Prerequisites
 
 - Python **3.8 or later**
-- `pip`
+- pip
 
 ## Create and activate a virtual environment (Linux / macOS)
 
