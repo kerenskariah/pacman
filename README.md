@@ -251,16 +251,6 @@ This plot shows PPO’s stability: despite high per-episode variance, the smooth
 ![PPO Score Progression](results/ppo/score_progression.png)
 
 
-## PPO Reward + Episode-Length Behavior
-
-This figure highlights:
-- Per-episode reward variance (top)
-- Number of steps survived per episode (bottom)
-
-Both metrics trend upward, indicating improved policy stability and survival time.
-
-![Reward + Steps](results/ppo/reward_steps.png)
-
 ### Why PPO Works Better
 
 * Clipped objective prevents destructive updates.
