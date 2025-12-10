@@ -70,7 +70,7 @@ pip install -r requirements.txt
 deactivate
 ```
 
-## If `requirements.txt` is missing
+## If requirements.txt is missing
 
 Create it from an active virtual environment:
 
@@ -127,8 +127,6 @@ pip freeze > requirements.txt
 └── README.md
 ```
 
----
-
 ## Functions in `main.py`
 
 ### `train(agent_class, config, render_human=False)`
@@ -156,19 +154,19 @@ Ensures preprocessing, rendering, and episode logic work.
 
 ### Q-Learning Agent
 
-Tabular Q-learning using RAM features — learns simple behaviors but quickly plateaus.
+- Tabular Q-learning using RAM features — learns simple behaviors but quickly plateaus.
 
 ### Deep Q-Learning (DQN)
 
-Neural network approximator, experience replay, target network. Learns meaningful behaviors but is noisy and unstable.
+- Neural network approximator, experience replay, target network. Learns meaningful behaviors but is noisy and unstable.
 
 ### PPO Agent
 
-Actor–critic architecture with clipped updates. Demonstrated the strongest and most stable performance in our experiments.
+- Actor–critic architecture with clipped updates. Demonstrated the strongest and most stable performance in our experiments.
 
 ### Dueling DQN (Prototype)
 
-Splits Q-values into Value + Advantage streams. Not fully implemented but included for completeness.
+- Splits Q-values into Value + Advantage streams. Not fully implemented but included for completeness.
 
 
 ## Training & Evaluation
@@ -197,7 +195,6 @@ python test.py
 bash play_5_ppo.sh
 ```
 
----
 
 ## Results (High-Level Summary)
 
