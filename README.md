@@ -41,7 +41,7 @@ These match the preprocessing pipeline used in many deep RL Atari benchmarks.
 
 ```
 python3 -m venv .venv
-````
+```
 
 2. Activate it:
 
