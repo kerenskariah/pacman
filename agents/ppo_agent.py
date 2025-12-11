@@ -140,14 +140,7 @@ class ACNetCNN(nn.Module):
 class PPOAgent:
     def __init__(self, cfg: PPOConfig, action_dim: int):
         self.cfg = cfg
-        # Prefer MPS on Mac, then CUDA, then CPU
-        if torch.backends.mps.is_available():
-            self.device = torch.device("mps")
-        elif torch.cuda.is_available():
-            self.device = torch.device("cuda")
-        else:
-            self.device = torch.device("cpu")
-        cfg.DEVICE = str(self.device)  # Update config
+        self.device = cfg.DEVICE
         print(f"PPO Agent using device: {self.device}")
         self.net = ACNetCNN(action_dim).to(self.device)
         self.opt = torch.optim.Adam(self.net.parameters(), lr=cfg.LR, eps=1e-5)
