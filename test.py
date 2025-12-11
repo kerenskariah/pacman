@@ -9,7 +9,7 @@ from config.random_config import RandomConfig
 from agents.deep_ql_agent import DQNAgent, DQNConfig
 
 # PPO imports
-from train_ppo import train_ppo_agent, play_ppo_agent, train as ppo_train
+from agents.ppo_agent import train_ppo_agent, play_ppo_agent, train as ppo_train
 from config.ppo_config import PPOConfig
 
 # Disable the SDL audio driver warnings so there's no console warning output fo rit

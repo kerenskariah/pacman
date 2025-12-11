@@ -1,8 +1,3 @@
-"""
-Comprehensive Training Metrics Visualization Script for PPO Agent
-Generates publication-quality plots for all metrics in training_log.csv
-"""
-
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
