@@ -35,11 +35,15 @@ These preprocessing steps ensure stability, reduce redundancy, help agents under
 - pip
 
 ## Create and activate a virtual environment (Linux / macOS)
+1. We're using the UV package manager. If you don't have `uv`, install here.
+```
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
 
-1. Create the virtual environment:
+2. Create the virtual environment:
 
 ```
-python3 -m venv .venv
+uv venv
 ```
 
 2. Activate it:
@@ -58,8 +62,7 @@ python -m venv .venv
 ## Install dependencies with pip
 
 ```
-pip install --upgrade pip setuptools wheel
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 ```
 
 
