@@ -1,5 +1,5 @@
 # train_dql.py
-from agents.deep_ql_agent import DQLAgent
+from agents.dqn_dql.deep_ql_agent import DQLAgent
 from config.dql_config import DQLConfig
 from main import train, play, record_gif
 import os

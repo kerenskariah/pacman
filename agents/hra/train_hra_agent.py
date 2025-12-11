@@ -8,9 +8,9 @@ import ale_py
 import numpy as np
 import os
 
-from agents.hra_agent import MicrosoftHRAAgent
+from agents.hra.hra_agent import MicrosoftHRAAgent
 from config.hra_config import HRAConfig
-from hra_wrapper import HRARewardWrapper
+# from hra_wrapper import HRARewardWrapper
 
 # Register environments to avoid Namespace errors
 gym.register_envs(ale_py)
@@ -22,7 +22,7 @@ def main():
     
     # Setup Environment
     env = gym.make('ALE/MsPacman-v5', render_mode=None)
-    env = HRARewardWrapper(env)
+    # env = HRARewardWrapper(env)
     
     config = HRAConfig()
     

@@ -12,7 +12,7 @@ import random
 from collections import deque
 
 # Assumes hra_network.py is in the root directory
-from hra_network import HRAMsPacmanNetwork
+from agents.hra.hra_network import HRAMsPacmanNetwork
 
 class ReplayBuffer:
     def __init__(self, capacity):

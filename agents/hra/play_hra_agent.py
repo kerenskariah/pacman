@@ -10,7 +10,7 @@ import numpy as np
 import os
 
 # --- CORRECTED IMPORTS ---
-from agents.hra_agent import MicrosoftHRAAgent
+from agents.hra.hra_agent import MicrosoftHRAAgent
 from config.hra_config import HRAConfig
 # -------------------------
 gym.register_envs(ale_py)

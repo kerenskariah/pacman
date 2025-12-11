@@ -6,10 +6,10 @@ from logging import getLogger
 
 from agents.random_agent import RandomAgent
 from config.random_config import RandomConfig
-from agents.deep_ql_agent import DQNAgent, DQNConfig
+from agents.dqn_dql.deep_ql_agent import DQNAgent, DQNConfig
 
 # PPO imports
-from agents.ppo_agent import train_ppo_agent, play_ppo_agent, train as ppo_train
+from agents.ppo.ppo_agent import train_ppo_agent, play_ppo_agent, train as ppo_train
 from config.ppo_config import PPOConfig
 
 # Disable the SDL audio driver warnings so there's no console warning output fo rit
@@ -41,7 +41,7 @@ def main():
         agent_to_run = RandomAgent
         config_to_use = RandomConfig()
     elif args.agent.lower() == 'dqn':
-        from agents.deep_ql_agent import DQLAgent
+        from agents.dqn_dql.deep_ql_agent import DQLAgent
         from config.dql_config import DQLConfig
 
         agent_to_run = DQLAgent
@@ -54,7 +54,7 @@ def main():
         config_to_use = QLearningConfig()
     elif args.agent.lower() == 'ppo':
         # PPO imports
-        from train_ppo import train_ppo_agent, play_ppo_agent, train as ppo_train
+        from agents.ppo.ppo_agent import train_ppo_agent, play_ppo_agent, train as ppo_train
         from config.ppo_config import PPOConfig
 
         agent_to_run = None  # PPO uses its own internal agent
