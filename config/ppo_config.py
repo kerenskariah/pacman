@@ -38,7 +38,7 @@ class PPOConfig(BaseConfig):
     LOG_INTERVAL: int = 10 # Log every 10 updates
     SAVE_INTERVAL: int = 50 # Save every 50 updates
     MODEL_DIR: str = "models/ppo"
-    LOG_DIR: str = "results/ppo"
+    LOG_DIR: str = "logs/ppo"
 
     # Misc
     DEVICE: str = ("mps" if torch.backends.mps.is_available() 
